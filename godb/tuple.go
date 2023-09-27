@@ -5,6 +5,7 @@ package godb
 
 import (
 	"bytes"
+	"encoding/binary"
 	"fmt"
 	"strings"
 
@@ -40,7 +41,20 @@ type TupleDesc struct {
 // all of their field objects are equal and they
 // are the same length
 func (d1 *TupleDesc) equals(d2 *TupleDesc) bool {
-	// TODO: some code goes here
+	if len(d1.Fields) != len(d2.Fields) {
+		return false
+	}
+	for i := range d1.Fields {
+		if d1.Fields[i].Fname != d2.Fields[i].Fname {
+			return false
+		}
+		if d1.Fields[i].TableQualifier != d2.Fields[i].TableQualifier {
+			return false
+		}
+		if d1.Fields[i].Ftype != d2.Fields[i].Ftype {
+			return false
+		}
+	}
 	return true
 
 }
@@ -75,8 +89,9 @@ func findFieldInTd(field FieldType, desc *TupleDesc) (int, error) {
 // another slice object does not make a copy of the contents of the slice.
 // Look at the built-in function "copy".
 func (td *TupleDesc) copy() *TupleDesc {
-	// TODO: some code goes here
-	return &TupleDesc{} //replace me
+	tupleDescCopy := make([]FieldType, len(td.Fields))
+	copy(tupleDescCopy, td.Fields)
+	return &TupleDesc{Fields: tupleDescCopy}
 }
 
 // Assign the TableQualifier of every field in the TupleDesc to be the
@@ -95,8 +110,8 @@ func (td *TupleDesc) setTableAlias(alias string) {
 // should consist of the fields of desc2
 // appended onto the fields of desc.
 func (desc *TupleDesc) merge(desc2 *TupleDesc) *TupleDesc {
-	// TODO: some code goes here
-	return &TupleDesc{}  //replace me
+	merged := append(desc.Fields, desc2.Fields...)
+	return &TupleDesc{Fields: merged}
 }
 
 // ================== Tuple Methods ======================
@@ -144,8 +159,25 @@ type recordID interface {
 // May return an error if the buffer has insufficient capacity to store the
 // tuple.
 func (t *Tuple) writeTo(b *bytes.Buffer) error {
-	// TODO: some code goes here
-	return nil //replace me
+	for _, field := range t.Fields {
+		if strVal, ok := field.(StringField); ok {
+			strBytes := []byte(strVal.Value)
+			padded := make([]byte, StringLength)
+			copy(padded, strBytes)
+			err := binary.Write(b, binary.LittleEndian, padded)
+			if err != nil {
+				return err
+			}
+		} else if intVal, ok := field.(IntField); ok {
+			val := int64(intVal.Value)
+			err := binary.Write(b, binary.LittleEndian, val)
+			if err != nil {
+				fmt.Print("\n err", err)
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 // Read the contents of a tuple with the specified [TupleDesc] from the
@@ -162,8 +194,27 @@ func (t *Tuple) writeTo(b *bytes.Buffer) error {
 // May return an error if the buffer has insufficent data to deserialize the
 // tuple.
 func readTupleFrom(b *bytes.Buffer, desc *TupleDesc) (*Tuple, error) {
-	// TODO: some code goes here
-	return nil, nil //replace me
+	tuple := &Tuple{Desc: *desc}
+
+	for _, field := range desc.Fields {
+		if field.Ftype == 1 {
+			f := make([]byte, StringLength)
+			err := binary.Read(b, binary.LittleEndian, f)
+			if err != nil {
+				return nil, err
+			}
+			trimmed := strings.TrimRight(string(f), "\x00")
+			tuple.Fields = append(tuple.Fields, StringField{trimmed})
+		} else {
+			var f int64
+			err := binary.Read(b, binary.LittleEndian, &f)
+			if err != nil {
+				return nil, err
+			}
+			tuple.Fields = append(tuple.Fields, IntField{f})
+		}
+	}
+	return tuple, nil
 
 }
 
@@ -172,14 +223,42 @@ func readTupleFrom(b *bytes.Buffer, desc *TupleDesc) (*Tuple, error) {
 // the [TupleDesc.equals] method, but fields can be compared directly with equality
 // operators.
 func (t1 *Tuple) equals(t2 *Tuple) bool {
-	// TODO: some code goes here
+	if t1 == nil && t2 == nil {
+		return true
+	}
+	if t1 == nil || t2 == nil {
+		return false
+	}
+
+	if !t1.Desc.equals(&t2.Desc) {
+		return false
+	}
+
+	if len(t1.Fields) != len(t2.Fields) {
+		return false
+	}
+
+	for i := range t1.Fields {
+		if t1.Fields[i] != t2.Fields[i] {
+			return false
+		}
+	}
+
 	return true
 }
 
 // Merge two tuples together, producing a new tuple with the fields of t2 appended to t1.
 func joinTuples(t1 *Tuple, t2 *Tuple) *Tuple {
-	// TODO: some code goes here
-	return &Tuple{}
+	mergedDesc := TupleDesc{
+		Fields: append(t1.Desc.Fields, t2.Desc.Fields...),
+	}
+
+	mergedFields := append(t1.Fields, t2.Fields...)
+
+	return &Tuple{
+		Desc:   mergedDesc,
+		Fields: mergedFields,
+	}
 }
 
 type orderByState int
@@ -202,8 +281,39 @@ const (
 // Calling the [Expr.EvalExpr] method on a tuple will return the value of the
 // expression on the supplied tuple.
 func (t *Tuple) compareField(t2 *Tuple, field Expr) (orderByState, error) {
-	// TODO: some code goes here
-	return OrderedEqual, nil // replace me
+	val1, err := field.EvalExpr(t)
+	if err != nil {
+		return OrderedEqual, err
+	}
+	val2, err := field.EvalExpr(t2)
+	if err != nil {
+		return OrderedEqual, err
+	}
+
+	if v1, ok := val1.(IntField); ok {
+		if v2, ok := val2.(IntField); ok {
+			if v1.Value == v2.Value {
+				return OrderedEqual, nil
+			} else if v1.Value > v2.Value {
+				return OrderedGreaterThan, nil
+			} else {
+				return OrderedLessThan, nil
+			}
+		}
+	}
+
+	if v1, ok := val1.(StringField); ok {
+		if v2, ok := val2.(StringField); ok {
+			if v1.Value < v2.Value {
+				return OrderedLessThan, nil
+			} else if v1.Value > v2.Value {
+				return OrderedGreaterThan, nil
+			} else {
+				return OrderedEqual, nil
+			}
+		}
+	}
+	return OrderedEqual, err
 }
 
 // Project out the supplied fields from the tuple. Should return a new Tuple
@@ -213,8 +323,24 @@ func (t *Tuple) compareField(t2 *Tuple, field Expr) (orderByState, error) {
 // do match on TableQualifier (e.g., a field  t1.name in fields should match an
 // entry t2.name in t, but only if there is not an entry t1.name in t)
 func (t *Tuple) project(fields []FieldType) (*Tuple, error) {
-	// TODO: some code goes here
-	return nil, nil  //replace me
+	projected := &Tuple{}
+
+	add := []int{}
+	for _, field := range fields {
+		for i, t := range t.Desc.Fields {
+			if field.Fname == t.Fname && field.TableQualifier == t.TableQualifier {
+				add = append(add, i)
+			} else if field.Fname == t.Fname {
+				add = append(add, i)
+			}
+		}
+	}
+
+	for i := range add {
+		projected.Fields = append(projected.Fields, t.Fields[i])
+	}
+
+	return projected, nil //replace me
 }
 
 // Compute a key for the tuple to be used in a map structure

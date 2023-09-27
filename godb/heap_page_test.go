@@ -10,7 +10,7 @@ func TestInsertHeapPage(t *testing.T) {
 	pg := newHeapPage(&td, 0, hf)
 	var expectedSlots = (PageSize - 8) / (StringLength + int(unsafe.Sizeof(int64(0))))
 	if pg.getNumSlots() != expectedSlots {
-		t.Fatalf("Incorrect number of slots, expected %d, got %d", expectedSlots, pg.getNumSlots())
+		t.Fatalf("Incorrect number of slots, `expected %d, got %d", expectedSlots, pg.getNumSlots())
 	}
 
 	pg.insertTuple(&t1)
