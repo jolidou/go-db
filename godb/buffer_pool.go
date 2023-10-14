@@ -18,7 +18,7 @@ const (
 )
 
 type BufferPool struct {
-	Pages map[heapHash]Page
+	Pages    map[heapHash]Page
 	NumPages int
 }
 
@@ -86,18 +86,6 @@ func (bp *BufferPool) GetPage(file DBFile, pageNo int, tid TransactionID, perm R
 		return nil, err
 	}
 
-	//tups := (*pgOutput).(*heapPage).Tuples
-
-	// Reconstruct tuple RIDs
-	// for i, t := range tups {
-	// 	if t != nil {
-	// 		var rid []int
-	// 		// RID: [pageNum, slotNum]
-	// 		rid = append(rid, pageNo, i)
-	// 		t.Rid = rid
-	// 	}
-	// }
-
 	// Filename:
 	currFile := file.(*HeapFile).Filename
 
@@ -105,7 +93,7 @@ func (bp *BufferPool) GetPage(file DBFile, pageNo int, tid TransactionID, perm R
 	if bp.NumPages == len(bp.Pages) {
 		// assume smallest (earliest) page number is highest possible page index in file - might not be in buffer pool
 		earliest := file.(*HeapFile).currPages
-		// curr pages 
+		// curr pages
 		if earliest == 0 {
 			earliest += 1
 		}
@@ -113,14 +101,14 @@ func (bp *BufferPool) GetPage(file DBFile, pageNo int, tid TransactionID, perm R
 		foundClean := false
 		for key, p := range bp.Pages {
 			// if !p.isDirty() {
-				// TODO - Delete first non-dirty page
-				if key.PageNo <= earliest && key.FileName == currFile {
-					pgToFlush = p
-					foundClean = true
-					earliest = key.PageNo
-				}
-				// foundClean = true // TODO - Use to determine if a non-dirty page exists
-				//break
+			// TODO - Delete first non-dirty page
+			if key.PageNo <= earliest && key.FileName == currFile {
+				pgToFlush = p
+				foundClean = true
+				earliest = key.PageNo
+			}
+			// foundClean = true // TODO - Use to determine if a non-dirty page exists
+			//break
 			// }
 		}
 		if !foundClean {
@@ -139,7 +127,7 @@ func (bp *BufferPool) GetPage(file DBFile, pageNo int, tid TransactionID, perm R
 
 	// Add the newly retrieved page to the buffer pool
 	bp.Pages[pageKey] = *pgOutput
-	
+
 	// Output page
 	return pgOutput, nil
 }

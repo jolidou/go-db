@@ -17,14 +17,9 @@ import (
 // HeapFile is a public class because external callers may wish to instantiate
 // database tables using the method [LoadFromCSV]
 type HeapFile struct {
-	// TODO: some code goes here
-	// Map page number to array of tuple slots (each of fixed size)
-	File     *os.File
-	Filename string
-	Desc     TupleDesc
-	// HeapFile should include the fields below;  you may want to add
-	// additional fields
-	bufPool *BufferPool
+	Filename  string
+	Desc      TupleDesc
+	bufPool   *BufferPool
 	currPages int
 	sync.Mutex
 }
@@ -50,13 +45,15 @@ func NewHeapFile(fromFile string, td *TupleDesc, bp *BufferPool) (*HeapFile, err
 	fileSize := fileInfo.Size()
 
 	numPages := int(fileSize) / PageSize
-	return &HeapFile{File: file, Filename: fromFile, Desc: *td, bufPool: bp, currPages: numPages}, nil
+	return &HeapFile{Filename: fromFile, Desc: *td, bufPool: bp, currPages: numPages}, nil
 }
 
 // Return the number of pages in the heap file
 func (f *HeapFile) NumPages() int {
 	// Stat the file
-	fileInfo, _ := f.File.Stat()
+	file, _ := os.Open(f.Filename)
+
+	fileInfo, _ := file.Stat()
 
 	// Get the file size in bytes
 	fileSize := fileInfo.Size()
@@ -177,23 +174,23 @@ func (f *HeapFile) readPage(pageNo int) (*Page, error) {
 // add support for concurrent modifications in lab 3.
 func (f *HeapFile) insertTuple(t *Tuple, tid TransactionID) error {
 	if f.currPages == 0 {
-        // Special case: Create the first page (Page 0) if it doesn't exist yet.
-        f.currPages += 1
-        newHP := *newHeapPage(&f.Desc, 0, f)
-        _, err := newHP.insertTuple(t)
-        if err != nil {
-            return err
-        }
-        var p Page = &newHP
+		// Special case: Create the first page (Page 0) if it doesn't exist yet.
+		f.currPages += 1
+		newHP := *newHeapPage(&f.Desc, 0, f)
+		_, err := newHP.insertTuple(t)
+		if err != nil {
+			return err
+		}
+		var p Page = &newHP
 
 		// Insert page to file and bufpool
-        f.flushPage(&p)
+		f.flushPage(&p)
 		_, err = f.bufPool.GetPage(f, 0, tid, ReadPerm)
 		if err != nil {
 			return err
-		} 
+		}
 		return nil
-    }
+	}
 	inserted := false
 	// pages are 0-indexed
 	// Go through cached pages first and check if we can insert tuple
@@ -212,7 +209,8 @@ func (f *HeapFile) insertTuple(t *Tuple, tid TransactionID) error {
 			}
 		}
 	}
-	
+
+	// TODO - check OTHER pages that are within currPages and NOT in buffer pool
 	// Otherwise, try to add a new page
 	if !inserted {
 		// Must add new page
@@ -229,7 +227,7 @@ func (f *HeapFile) insertTuple(t *Tuple, tid TransactionID) error {
 		_, err = f.bufPool.GetPage(f, f.currPages-1, tid, ReadPerm)
 		if err != nil {
 			return err
-		} 
+		}
 	}
 	return nil
 
@@ -244,12 +242,12 @@ func (f *HeapFile) insertTuple(t *Tuple, tid TransactionID) error {
 // heap page and slot within the page that the tuple came from.
 func (f *HeapFile) deleteTuple(t *Tuple, tid TransactionID) error {
 	// Check if t.Rid is a slice of int
-	data, ok := t.Rid.([]int)
+	rid, ok := t.Rid.(rID)
 	if !ok {
-		return fmt.Errorf("t.Rid is not of type []int")
+		return fmt.Errorf("tuple's record ID is not a valid rID")
 	}
 
-	pageNum := data[0]
+	pageNum := rid.Page
 
 	pg, err := f.bufPool.GetPage(f, pageNum, tid, WritePerm)
 	if err != nil {
@@ -289,7 +287,7 @@ func (f *HeapFile) flushPage(p *Page) error {
 	if err != nil {
 		return err
 	}
-	
+
 	return nil
 }
 
@@ -333,19 +331,17 @@ func (f *HeapFile) Iterator(tid TransactionID) (func() (*Tuple, error), error) {
 					}
 				}
 				if next == nil {
-					// slotNum += 1
 					continue
 				}
 				if next.Rid == nil {
-					var rid []int
-					rid = append(rid, i, slotNum)
+					rid := rID{Page: i, Slot: slotNum}
 					next.Rid = rid
 				}
 				slotNum += 1
 				return next, err
 			}
 			if pageIter == nil || next == nil {
-				if i > f.currPages && f.currPages != 0{
+				if i > f.currPages && f.currPages != 0 {
 					return nil, nil
 				} else {
 					page, err := f.bufPool.GetPage(f, i, tid, ReadPerm)
