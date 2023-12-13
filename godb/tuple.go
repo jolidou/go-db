@@ -144,6 +144,16 @@ type Tuple struct {
 type recordID interface {
 }
 
+type rID struct {
+	Page int
+	Slot int
+}
+
+type rrID struct {
+	Page []int
+	Slot []int
+}
+
 // Serialize the contents of the tuple into a byte array Since all tuples are of
 // fixed size, this method should simply write the fields in sequential order
 // into the supplied buffer.
@@ -172,7 +182,6 @@ func (t *Tuple) writeTo(b *bytes.Buffer) error {
 			val := int64(intVal.Value)
 			err := binary.Write(b, binary.LittleEndian, val)
 			if err != nil {
-				fmt.Print("\n err", err)
 				return err
 			}
 		}
@@ -249,6 +258,12 @@ func (t1 *Tuple) equals(t2 *Tuple) bool {
 
 // Merge two tuples together, producing a new tuple with the fields of t2 appended to t1.
 func joinTuples(t1 *Tuple, t2 *Tuple) *Tuple {
+	if t1 == nil {
+		return t2
+	}
+	if t2 == nil {
+		return t1
+	}
 	mergedDesc := TupleDesc{
 		Fields: append(t1.Desc.Fields, t2.Desc.Fields...),
 	}
@@ -336,11 +351,11 @@ func (t *Tuple) project(fields []FieldType) (*Tuple, error) {
 		}
 	}
 
-	for i := range add {
+	for _, i := range add {
 		projected.Fields = append(projected.Fields, t.Fields[i])
 	}
 
-	return projected, nil //replace me
+	return projected, nil
 }
 
 // Compute a key for the tuple to be used in a map structure
@@ -416,4 +431,8 @@ func (t *Tuple) PrettyPrintString(aligned bool) string {
 	}
 	return outstr
 
+}
+
+func (f1 FieldType) fieldEquals(f2 FieldType) bool {
+	return (f1.Fname == f2.Fname && f1.Ftype == f2.Ftype && f1.TableQualifier == f2.TableQualifier)
 }

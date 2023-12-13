@@ -1,0 +1,27 @@
+For lab 1, our first key design decision was our eviction policy, which resembles LRU, if we assume tuples will not be deleted from earlier pages- of course,
+this is subject to modification in later labs. Currently, in GetPage(), we find the lowest page number the current file has stored in the buffer pool, 
+and we evict it- this helps pages that were just added, which probably still have empty slots, remain available in the cache for fast insertion. 
+Another design decision was to optimize insertTuple() in HeapFile by iterating through cached pages first, instead of going through file page numbers
+and trying to find them in the cache. Otherwise, we would’ve had to load pages from the file that weren’t in the buffer pool anyways, which defeats the purpose
+of the cache. Additionally, to protect against errors or unexpected behavior regarding memory allocation, we use fixed-size structures whenever possible, 
+such as initializing the Tuples field in each heapPage to a slice of size numSlots (number of non-header slots per page), and padding the buffer in heapPage’s
+toBuffer() method to have size PageSize.
+
+We also made design decisions regarding structures to maximize type safety and track necessary information. In heapPage, we added the aforementioned Tuples slice, 
+and a boolean to check if the page is dirty, which we modify to track page changes that are in the buffer pool but not yet in the disk. In HeapFile, we added fields
+Filename (file path) and Desc (tuple desc), which are used when inserting new data, like new pages, and currPages, which tracks how many pages exist in the file for iterating. 
+For the BufferPool, we store Pages, a map of heapHash to Page. For heapHash, we store the file path and page number, so different HeapFiles would efficiently know which pages
+they’d stored when reading from the buffer pool. These changes were made to persist information for later operations, like flushing pages. Also, for type safety,
+we created structure rID, which implements empty interface recordID, to store integer fields Page and Slot, which track, for each tuple, the page number and slot index
+in the page where the tuple is stored. This enables us to keep track of empty slots in each page when inserting or deleting tuples.
+
+There are some missing elements of the code, to be implemented in later labs. First, we did not implement the dirty page check when flushing,
+as per instructor directions, which said “You do not need to worry about flushing dirty pages in your implementation.” (Piazza 134). Also,
+transactions and locking are not implemented, as they are to be implemented in later labs. 
+
+Regarding time spent on the lab, my partner and I dedicated 35 hours. Technically, the most time-consuming step was implementing the HeapFile. 
+This was difficult because we had to iterate over previously created elements, fixing all our methods, particularly in heapPage and the BufferPool’s
+getPage() method. There were a few main sources of confusion. First, we had not worked much with Go, or similar languages which use pointers and explicit
+storage allocation. This resulted in many errors with storing data. Also, we were confused about how the different components relate to each other,
+but we understood this more clearly as we progressed. For example, we were confused on when to flush pages and how to persist data, like tuple RIDs,
+when flushing and reading pages from the BufferPool.

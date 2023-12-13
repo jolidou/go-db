@@ -1,0 +1,22 @@
+For the first half of the lab (the granting locks section), we chose to make a data structure Locks for mapping transaction IDs to 
+a “TransactionTuple.” The TransactionTuple was a struct we made with the page, permissions, file, and page number. This way, we could 
+keep track of which locks each transaction ID had, along with what page that lock was associated with, and the type of lock (Read vs Write). 
+To do so, we added several helper functions used to help determine whether or not locks were still being held by other transaction ids. 
+Specifically, pageLockedByAnotherTransaction() checks if an exclusive lock can be acquired, and pageLockedByExclusiveTransaction() checks 
+if a read lock can be acquired. This data structure was reset every time we aborted or committed a transaction.
+
+For the second half of the lab (deadlock detection), we chose to use DFS to find cycles in a wait-for graph. To do so, we added a new data 
+structure Waitlist, which mapped transaction IDs to other transaction IDs that it was waiting for. This particular implementation allowed 
+for faster access time and faster deletion.This data structure was essentially an adjacency list that we could use to run DFS on. For the 
+actual DFS implementation, we added two helper functions, detectCycleHelper() and detectCycle(). Every time we tried to grant a lock, 
+detectCycle() would be called, and if a cycle was detected, we aborted that transaction ID. This data structure was updated every time we 
+aborted or committed a transaction.
+
+We also had to modify some previously existing code. Our previous implementation of insertTuple in HeapFile sometimes did not use the bufferpool 
+GetPage, so we had to modify the code such that it did. Additionally, we were incorrectly flushing pages after they were dirtied, so we had to 
+go through and make some changes involving when pages were set as dirty and when we were flushing. We were also incorrectly returning err instead
+of nil sometimes.
+
+We spent approximately 25 hours on this lab. Debugging this lab was pretty difficult because of the concurrency, and it was often difficult to 
+tell exactly where errors were coming from. The randomization of test results due to threads being run and aborted in different orders also made 
+debugging difficult. 

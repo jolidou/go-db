@@ -1,0 +1,19 @@
+Overall, my partner and I followed the instructions in the Github readme for all the design decisions we made. 
+For the join operator implementation, we used a nested loop in the iterator, as suggested, where we went through the left iterator once 
+and the right iterator once for every tuple in the left iterator. 
+For the aggregate operator implementation, we followed the example implementations. For sum, we kept track of the running sum, and for average, 
+we kept track of the running average. We also used the suggested iterator implementation with the three helper functions. In the finalized iterator, 
+we used the counter to keep track of the current tuple / group we were iterating over, and joined the tuples accordingly. 
+In project_op.go, we implemented support for distinct by making a list called “seen”. This list kept track of all the fields that were already returned, 
+so that in the future, fields would only be returned if they were not seen, making them distinct. 
+In order_by, we followed the suggestion and used the sort.Sort package by adding the three methods Swap, Len, and Less in addition to Sort. 
+We also added a list tups to the constructor to store a list of tuples to sort. This tups list gets populated in the iterator, 
+and gets referenced in the Sort helper methods.
+In limit, we added a new integer limit to store the numerical limit when the operator is initialized. The query parser also worked as expected.
+We also updated the eviction policy from code in Lab 1 with setting pages as dirty/clean and flushing correctly. 
+
+As for incomplete elements of our code, we did not implement a faster join algorithm than a nested loop join.
+
+We spent about 20 hours on this lab. The most difficult part was constructing iterators with stored states. 
+Additionally, we encountered lots of problems that arose from uncaught bugs in the Lab 1 code. As all the Lab 1 test cases were passing, 
+this made it difficult to debug, as we had to just keep on printing everything out to see what was going wrong. 

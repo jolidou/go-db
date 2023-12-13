@@ -1,0 +1,28 @@
+For the HeapPage structure, we chose to store its HeapFile, its pageNo, the tuple Description, a slice of Tuples, and whether or not the page was dirty. 
+To be sure we were managing our memory and storage of data correctly, we initialized every slice of Tuples to a slice of size numSlots. 
+We also padded the buffer in toBuffer() with 0s at the end to always be PageSize, to ensure that all buffers had the same size. 
+In HeapPage, whenever we delete a tuple, we set that slot in the slice to nil. To identify each tuple, for type safety, we chose to create a rID struct. 
+This struct has Page and Slot both as integers, which represent the page number and the slot number respectively.
+We used this rid structure to determine which tuples to delete.
+
+In the BufferPool, we made a map mapping from the heapHash structure to a Page. 
+This map was used to efficiently fetch pages in the buffer pool, where the heapHash was the index. For the heapHash, as suggested, 
+we generated the key based on the file name and page number. For the getPage function, we chose to always evict the smallest possible page number, 
+as this one is the most likely to be the least recently used page. This helped the efficiency of when we create new pages, 
+as they need to be accessed the soonest and thus should be in the bufferpool.
+
+For the HeapFile structure, we chose to store the filename, the tuple description, a pointer to its bufferpool, and the number of current pages. 
+The number of current pages was used in the iterator to iterate through all current pages that we have made. Additionally, when inserting a tuple, 
+we first look through the cached pages to see if there are empty slots to insert into to optimize the code. 
+
+For future labs, we will have to worry about flushing dirty versus clean pages (in this one, 
+referencing a Piazza post saying we do not need to worry about flushing dirty pages). We will also have to implement transactions and locking in future labs.
+
+This lab took me and my partner at least 30 hours. The part that took us the longest by far was heap_file, when we had to debug everything. 
+It was difficult debugging, especially being beginners at Golang with almost zero experience working with pointers. 
+It was also pretty frustrating how you had to have a correctly working iterator to test the code, and having a working iterator was definitely not easy. 
+Having to write three to four functions before being able to run one unit test was also frustrating, as often, 
+we would write a ton of code only for it to all be incorrect.  The most confusing thing was probably just the concept of GetPage in BufferPool; 
+having to flush pages into the file and get the data back was hard to debug as it was not easy to print out exactly what was happening. 
+The concept of TupleDesc was also really confusing for quite a while, as well as all the different data types that were introduced 
+(e.g. FieldType, IntField, etc.) Also, having to cast between HeapPage and Page was also frustrating to figure out how to do. 

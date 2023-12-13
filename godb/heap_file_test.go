@@ -1,6 +1,7 @@
 package godb
 
 import (
+	"fmt"
 	"os"
 	"testing"
 )
@@ -50,7 +51,10 @@ func TestCreateAndInsertHeapFile(t *testing.T) {
 	iter, _ := hf.Iterator(tid)
 	i := 0
 	for {
-		t, _ := iter()
+		t, err := iter()
+		if err != nil {
+			fmt.Println(err)
+		}
 		if t == nil {
 			break
 		}

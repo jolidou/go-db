@@ -21,7 +21,7 @@ type HeapFile struct {
 	Desc      TupleDesc
 	bufPool   *BufferPool
 	currPages int
-	sync.Mutex
+	m         sync.Mutex
 }
 
 // Create a HeapFile.
@@ -33,6 +33,7 @@ type HeapFile struct {
 func NewHeapFile(fromFile string, td *TupleDesc, bp *BufferPool) (*HeapFile, error) {
 	var file *os.File
 	file, err := os.Open(fromFile)
+	defer file.Close()
 	if err != nil {
 		file, err = os.Create(fromFile)
 		if err != nil {
@@ -52,6 +53,7 @@ func NewHeapFile(fromFile string, td *TupleDesc, bp *BufferPool) (*HeapFile, err
 func (f *HeapFile) NumPages() int {
 	// Stat the file
 	file, _ := os.Open(f.Filename)
+	defer file.Close()
 
 	fileInfo, _ := file.Stat()
 
@@ -111,11 +113,28 @@ func (f *HeapFile) LoadFromCSV(file *os.File, hasHeader bool, sep string, skipLa
 		}
 		newT := Tuple{*f.Descriptor(), newFields, nil}
 		tid := NewTID()
-		f.bufPool.BeginTransaction(tid)
+		bp := f.bufPool
+		bp.BeginTransaction(tid)
 		f.insertTuple(&newT, tid)
+
+		// hack to force dirty pages to disk
+		// because CommitTransaction may not be implemented
+		// yet if this is called in lab 1 or 2
+		for j := 0; j < f.NumPages(); j++ {
+			pg, err := bp.GetPage(f, j, tid, ReadPerm)
+			if pg == nil || err != nil {
+				//			fmt.Println("page nil or error", err)
+				break
+			}
+			if (*pg).isDirty() {
+				(*f).flushPage(pg)
+				(*pg).setDirty(false)
+			}
+
+		}
+
 		//commit frequently, to avoid all pages in BP being full
-		//todo fix
-		f.bufPool.CommitTransaction(tid)
+		bp.CommitTransaction(tid)
 	}
 	return nil
 }
@@ -173,36 +192,60 @@ func (f *HeapFile) readPage(pageNo int) (*Page, error) {
 // worry about concurrent transactions modifying the Page or HeapFile.  We will
 // add support for concurrent modifications in lab 3.
 func (f *HeapFile) insertTuple(t *Tuple, tid TransactionID) error {
+	f.m.Lock()
+	defer f.m.Unlock()
 	if f.currPages == 0 {
 		// Special case: Create the first page (Page 0) if it doesn't exist yet.
 		f.currPages += 1
 		newHP := *newHeapPage(&f.Desc, 0, f)
-		_, err := newHP.insertTuple(t)
-		if err != nil {
-			return err
-		}
 		var p Page = &newHP
 
 		// Insert page to file and bufpool
 		f.flushPage(&p)
-		_, err = f.bufPool.GetPage(f, 0, tid, ReadPerm)
+
+		// Try to get page from buf pool
+		f.m.Unlock()
+		TP, err := f.bufPool.GetPage(f, 0, tid, WritePerm)
+		f.m.Lock()
 		if err != nil {
 			return err
+		}
+
+		HP := (*TP).(*heapPage)
+		rid, err := HP.insertTuple(t)
+
+		if err != nil {
+			return err
+		}
+		// tuple successfully inserted
+		if rid != nil {
+			HP.setDirty(true)
 		}
 		return nil
 	}
 	inserted := false
 	// pages are 0-indexed
 	// Go through cached pages first and check if we can insert tuple
-	for hh, p := range f.bufPool.Pages {
+	for hh, _ := range f.bufPool.Pages {
 		if hh.FileName == f.Filename {
-			rid, err := p.(*heapPage).insertTuple(t)
+			//fmt.Println("inserting other tuple")
+			f.m.Unlock()
+			p, err := f.bufPool.GetPage(f, hh.PageNo, tid, WritePerm)
+			f.m.Lock()
+			if err != nil {
+				return err
+			}
+
+			hp := (*p).(*heapPage)
+			rid, err := hp.insertTuple(t)
+
 			if err != nil {
 				// current page is full - check next page
-				continue
+				return err
 			}
+			// tuple was successfully inserted
 			if rid != nil {
-				p.(*heapPage).Dirty = true
+				hp.setDirty(true)
 				// update curr page if needed
 				inserted = true
 				return nil
@@ -210,23 +253,31 @@ func (f *HeapFile) insertTuple(t *Tuple, tid TransactionID) error {
 		}
 	}
 
-	// TODO - check OTHER pages that are within currPages and NOT in buffer pool
+	// check OTHER pages that are within currPages and NOT in buffer pool
 	// Otherwise, try to add a new page
 	if !inserted {
 		// Must add new page
 		f.currPages += 1
 		// pages are 0-indexed
 		newHP := *newHeapPage(&f.Desc, f.currPages-1, f)
-		_, err := newHP.insertTuple(t)
+		var p Page = &newHP
+		f.flushPage(&p)
+		//fmt.Println("inserting other tuple on new pages")
+		f.m.Unlock()
+		TP, err := f.bufPool.GetPage(f, f.currPages-1, tid, WritePerm)
+		f.m.Lock()
 		if err != nil {
 			return err
 		}
-		var p Page = &newHP
-		f.flushPage(&p)
-		// Try to add page to buffer pool
-		_, err = f.bufPool.GetPage(f, f.currPages-1, tid, ReadPerm)
+
+		HP := (*TP).(*heapPage)
+		rid, err := HP.insertTuple(t)
 		if err != nil {
 			return err
+		}
+		// if tuple was inserted successfully
+		if rid != nil {
+			HP.setDirty(true)
 		}
 	}
 	return nil
@@ -241,15 +292,19 @@ func (f *HeapFile) insertTuple(t *Tuple, tid TransactionID) error {
 // so you can supply any object you wish.  You will likely want to identify the
 // heap page and slot within the page that the tuple came from.
 func (f *HeapFile) deleteTuple(t *Tuple, tid TransactionID) error {
-	// Check if t.Rid is a slice of int
+	f.m.Lock()
+	defer f.m.Unlock()
+
+	// Check if t.Rid is an Rid
 	rid, ok := t.Rid.(rID)
 	if !ok {
 		return fmt.Errorf("tuple's record ID is not a valid rID")
 	}
 
 	pageNum := rid.Page
-
+	f.m.Unlock()
 	pg, err := f.bufPool.GetPage(f, pageNum, tid, WritePerm)
+	f.m.Lock()
 	if err != nil {
 		return err
 	}
@@ -260,6 +315,7 @@ func (f *HeapFile) deleteTuple(t *Tuple, tid TransactionID) error {
 		return err
 	}
 	hPg.Dirty = true
+	//f.m.Unlock()
 	return nil
 }
 
@@ -272,7 +328,6 @@ func (f *HeapFile) flushPage(p *Page) error {
 	hPg := (*p).(*heapPage)
 	pageNo := hPg.PageNo
 
-	hPg.Dirty = false
 	pgData, _ := hPg.toBuffer()
 	dataBytes := pgData.Bytes()
 
@@ -287,6 +342,7 @@ func (f *HeapFile) flushPage(p *Page) error {
 	if err != nil {
 		return err
 	}
+	hPg.Dirty = false
 
 	return nil
 }
@@ -316,36 +372,52 @@ func (f *HeapFile) Iterator(tid TransactionID) (func() (*Tuple, error), error) {
 			var next *Tuple
 			if pageIter != nil {
 				next, err := pageIter()
-				if err != nil {
+				if i >= f.currPages && f.currPages != 0 {
+					fmt.Println("C0", i, slotNum)
+					return nil, nil
+				}
+				if next == nil {
 					i += 1
 					// Try to get page from bufpool: if error, return nil
 					if i > f.currPages && f.currPages != 0 {
+						fmt.Println("C1", i, slotNum, tid)
 						return nil, nil
 					} else {
 						page, err := f.bufPool.GetPage(f, i, tid, ReadPerm)
+						if page == nil {
+							fmt.Println("C2", i, slotNum, tid)
+							return nil, nil
+						}
 						if err != nil {
+							fmt.Println("C3", i, slotNum, tid)
 							return nil, err
 						}
 						slotNum = 0
 						pageIter = (*page).(*heapPage).tupleIter()
 					}
 				}
-				if next == nil {
-					continue
-				}
-				if next.Rid == nil {
+				if next != nil && next.Rid == nil {
 					rid := rID{Page: i, Slot: slotNum}
 					next.Rid = rid
 				}
+				if err != nil {
+					fmt.Println("C4", i, slotNum, tid)
+					return nil, err
+				}
 				slotNum += 1
-				return next, err
+				if next != nil {
+					return next, nil
+				}
+				continue
 			}
 			if pageIter == nil || next == nil {
 				if i > f.currPages && f.currPages != 0 {
+					fmt.Println("C5", i, slotNum, tid)
 					return nil, nil
 				} else {
 					page, err := f.bufPool.GetPage(f, i, tid, ReadPerm)
 					if err != nil {
+						fmt.Println("C6", i, slotNum, tid)
 						return nil, err
 					}
 					slotNum = 0

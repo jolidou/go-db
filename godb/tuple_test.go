@@ -15,6 +15,7 @@ func CheckIfOutputMatches(f func() (*Tuple, error), ts []*Tuple) bool {
 		//		fmt.Printf("%v\n", t1)
 		got := false
 		for _, t2 := range ts {
+			//fmt.Println("t1", t1, "t2", t2)
 			if t1.equals(t2) {
 				got = true
 				break

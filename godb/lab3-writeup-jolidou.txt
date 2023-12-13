@@ -1,0 +1,24 @@
+For this lab, we implemented strict two-phase locking and a NO-STEAL/FORCE buffer management policy, as recommended. We chose the mutex 
+synchronization primitive for thread isolation, page-level locking, and a depth-first search algorithm on a dependency graph for cycle detection.
+To keep track of locks, we added a Locks structure to the buffer pool, which maps each transaction ID to a list of page-level locks that transaction has,
+where each lock is structured as a TransactionTuple. TransactionTuple stores a page, file, page number, and the permission (RWPerm) needed, giving us 
+enough information for page-level locking. When a transaction is committed or aborted, we let go of the locks TID is holding in Locks. Another added 
+structure in the buffer pool is Waitlist, which maps each transaction ID (tid_1) to the transactions they are waiting for. Each wait-for value is 
+structured as another map with transaction ID keys (tid_1, tid_2,...,tid_n), each mapping to true (trivially, since keys exist iff tid_1 is waiting
+for them, and are removed otherwise). Waitlist is structured as a nested map for fast lookups and easy deletion, since checking for a given 
+transaction ID in each list would have taken longer and made our code more prone to human error in list manipulation. Waitlist is used in our 
+cycle-detection algorithm, and upon commit or abort, a transaction’s waitlist is deleted, and its transaction ID is removed from the waitlists of any 
+other transactions that were waiting on it.
+
+For deadlock detection, we perform a cycle detection check to see if a transaction can safely be granted the lock (exclusive or shared) it needs when 
+trying to retrieve a page. A write needs an exclusive lock, so we check if the page is locked by any transaction by iterating through all buffer pool 
+locks and finding other transactions’ locks on that same page, adding them (if any) to the waitlist. Reads are similar, but check only for an exclusive 
+lock on the page. Once the wait graph is set, we run detectCycle(), which performs a depth-first search. If a cycle is found, we chose to abort the 
+caller transaction rather than all the transactions it is waiting for, since we did not want to have to abort a large number of transactions, although 
+this does mean the end-user must retry the aborted transaction.
+
+To our knowledge, there are no missing or incomplete elements of our code. We did encounter difficulties with undetected errors in code from previous 
+labs, such as incorrectly returning errors instead of nils from tuple insertion, or marking pages dirty incorrectly (for example, they were being 
+marked dirty even when tuples were not successfully inserted). Something we found especially confusing was debugging the concurrent code, as it was 
+hard determining the root causes of our problems. Overall, we spent approximately 25 hours on this lab.
+
